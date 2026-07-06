@@ -679,9 +679,9 @@
 <script>
   (function() {
     // === НАСТРОЙКИ GITHUB ===
-    const GITHUB_USERNAME = 'ваш-логин'; // ЗАМЕНИТЕ НА СВОЙ
-    const GITHUB_REPO = 'ваш-репозиторий'; // ЗАМЕНИТЕ НА СВОЙ
-    const GITHUB_TOKEN = 'ваш-token'; // ЗАМЕНИТЕ НА СВОЙ (нужны права repo)
+    const GITHUB_USERNAME = 'prizivpokoinikacha';
+    const GITHUB_REPO = 'bromess';
+    const GITHUB_TOKEN = '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';
     const FILE_PATH = 'bromess.md';
 
     let messages = [];
@@ -702,15 +702,14 @@
         
         if (!response.ok) {
           if (response.status === 404) {
-            // Файл не существует — создадим пустой
-            return { content: btoa(JSON.stringify({ users: {}, messages: [] })), sha: null };
+            return { content: { users: {}, messages: [] }, sha: null };
           }
           throw new Error(`Ошибка загрузки: ${response.status}`);
         }
         
         const data = await response.json();
-        const content = atob(data.content);
-        return { content: JSON.parse(content), sha: data.sha };
+        const content = JSON.parse(atob(data.content));
+        return { content: content, sha: data.sha };
       } catch (e) {
         console.error('Ошибка загрузки из GitHub:', e);
         return null;
@@ -750,8 +749,7 @@
       try {
         const result = await fetchFromGitHub();
         if (result) {
-          const fileData = result.content;
-          data = fileData;
+          data = result.content;
           messages = data.messages || [];
           currentUser = data.currentUser || null;
           if (currentUser && !data.users[currentUser]) {
@@ -776,14 +774,12 @@
         data.messages = messages;
         data.currentUser = currentUser;
         
-        // Получаем текущий SHA
         const current = await fetchFromGitHub();
         const sha = current ? current.sha : null;
         
         const newSha = await saveToGitHub(data, sha);
         if (newSha) {
           document.getElementById('syncStatus').textContent = '✓ синхронизировано';
-          // Сохраняем локально как резерв
           localStorage.setItem('bromess_backup', JSON.stringify(data));
         } else {
           document.getElementById('syncStatus').textContent = '⚠ ошибка синхронизации';
@@ -1034,7 +1030,6 @@
       const login = loginInput.value.trim();
       if (!login) { loginError.textContent = 'Введите логин'; return; }
       
-      // Проверяем, есть ли пользователь в данных
       if (data.users[login]) {
         loginError.textContent = '❌ Логин занят. Войдите под другим.';
         return;
@@ -1087,19 +1082,11 @@
 
     // === init ===
     async function init() {
-      // Проверяем настройки GitHub
-      if (GITHUB_USERNAME === 'ваш-логин' || GITHUB_REPO === 'ваш-репозиторий' || GITHUB_TOKEN === 'ваш-token') {
-        alert('⚠️ Настройте GitHub в коде!\nЗамените GITHUB_USERNAME, GITHUB_REPO и GITHUB_TOKEN');
-        loginModal.classList.remove('hidden');
-        return;
-      }
-
       // Загружаем данные из GitHub
       document.getElementById('syncStatus').textContent = '● загрузка...';
       const loaded = await loadFromGitHub();
       
       if (!loaded) {
-        // Если не загрузилось, пробуем восстановить из localStorage
         const backup = localStorage.getItem('bromess_backup');
         if (backup) {
           try {
@@ -1222,4 +1209,4 @@
   })();
 </script>
 </body>
-</html>
+  </html>
