@@ -53,7 +53,6 @@
       }
     }
 
-    /* Left panel (chat) */
     .chat-panel {
       flex: 1;
       display: flex;
@@ -62,7 +61,6 @@
       height: 100%;
     }
 
-    /* Right panel (contacts) */
     .contacts-panel {
       width: 0;
       overflow: hidden;
@@ -95,7 +93,6 @@
       }
     }
 
-    /* header */
     .header {
       background: #1e2a36;
       padding: 12px 16px 10px 16px;
@@ -187,7 +184,6 @@
       text-overflow: ellipsis;
     }
 
-    /* contacts header */
     .contacts-header {
       padding: 12px 16px 8px 16px;
       border-bottom: 1px solid #2b3a4a;
@@ -256,7 +252,6 @@
       padding: 30px 10px;
     }
 
-    /* messages */
     .messages-container {
       flex: 1;
       overflow-y: auto;
@@ -351,7 +346,6 @@
       margin: auto 0;
     }
 
-    /* input area */
     .input-area {
       background: #1e2a36;
       padding: 8px 12px 12px 12px;
@@ -434,7 +428,6 @@
       letter-spacing: 0.2px;
     }
 
-    /* modals */
     .modal-overlay {
       position: absolute;
       inset: 0;
@@ -571,7 +564,6 @@
       }
     }
 
-    /* image preview */
     .image-preview-overlay {
       position: fixed;
       inset: 0;
@@ -589,13 +581,19 @@
       border-radius: 12px;
       object-fit: contain;
     }
+    .sync-status {
+      font-size: 10px;
+      color: #6a7d8d;
+      padding: 2px 8px;
+      background: #0e1621;
+      border-radius: 10px;
+      margin-left: 4px;
+    }
   </style>
 </head>
 <body>
 <div id="app">
-  <!-- Chat panel -->
   <div class="chat-panel">
-    <!-- Header -->
     <div class="header">
       <div class="header-brand" id="profileTrigger">
         <svg viewBox="0 0 24 24" width="24" height="24">
@@ -613,10 +611,8 @@
       </div>
     </div>
 
-    <!-- Messages -->
     <div id="messagesList" class="messages-container"></div>
 
-    <!-- Input -->
     <div class="input-area">
       <div class="input-row">
         <button class="btn-icon btn-secondary" id="fileBtn" aria-label="Файл">📎</button>
@@ -627,10 +623,12 @@
       <input type="file" id="fileInput" class="file-input-hidden" multiple>
       <input type="file" id="imageInput" class="file-input-hidden" accept="image/*" multiple>
     </div>
-    <div class="footer-note">сохранено в bromess.md</div>
+    <div class="footer-note">
+      <span>сохранено в bromess.md</span>
+      <span class="sync-status" id="syncStatus">● синхронизация</span>
+    </div>
   </div>
 
-  <!-- Contacts panel -->
   <div class="contacts-panel" id="contactsPanel">
     <div class="contacts-header">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -642,12 +640,11 @@
     <div class="contacts-list" id="contactsListContainer"></div>
   </div>
 
-  <!-- Login Modal -->
   <div id="loginModal" class="modal-overlay">
     <div class="modal-card">
       <h2>Вход в bromess</h2>
       <label>Логин</label>
-      <input id="loginInput" type="text" placeholder="Введите логин" value="alex">
+      <input id="loginInput" type="text" placeholder="Введите логин">
       <div id="loginError" class="modal-error"></div>
       <div class="modal-actions">
         <button id="loginBtn" class="primary">Войти</button>
@@ -656,7 +653,6 @@
     </div>
   </div>
 
-  <!-- Profile Modal -->
   <div id="profileModal" class="modal-overlay hidden">
     <div class="modal-card">
       <h2>Профиль</h2>
@@ -675,7 +671,6 @@
     </div>
   </div>
 
-  <!-- Image preview -->
   <div id="imagePreviewOverlay" class="image-preview-overlay hidden">
     <img id="previewImage" src="" alt="preview">
   </div>
@@ -683,27 +678,127 @@
 
 <script>
   (function() {
-    // === Data ===
-    const STORAGE_KEY = 'bromess_data';
+    // === НАСТРОЙКИ GITHUB ===
+    const GITHUB_USERNAME = 'ваш-логин'; // ЗАМЕНИТЕ НА СВОЙ
+    const GITHUB_REPO = 'ваш-репозиторий'; // ЗАМЕНИТЕ НА СВОЙ
+    const GITHUB_TOKEN = 'ваш-token'; // ЗАМЕНИТЕ НА СВОЙ (нужны права repo)
+    const FILE_PATH = 'bromess.md';
 
-    function loadData() {
+    let messages = [];
+    let currentUser = null;
+    let data = { users: {} };
+    let syncInProgress = false;
+
+    // === РАБОТА С GITHUB ===
+    async function fetchFromGitHub() {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') return parsed;
+        const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${FILE_PATH}`;
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `token ${GITHUB_TOKEN}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        });
+        
+        if (!response.ok) {
+          if (response.status === 404) {
+            // Файл не существует — создадим пустой
+            return { content: btoa(JSON.stringify({ users: {}, messages: [] })), sha: null };
+          }
+          throw new Error(`Ошибка загрузки: ${response.status}`);
         }
-      } catch (e) {}
-      return { users: {}, messages: [], currentUser: null };
+        
+        const data = await response.json();
+        const content = atob(data.content);
+        return { content: JSON.parse(content), sha: data.sha };
+      } catch (e) {
+        console.error('Ошибка загрузки из GitHub:', e);
+        return null;
+      }
     }
 
-    function saveData(data) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    async function saveToGitHub(content, sha) {
+      try {
+        const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${FILE_PATH}`;
+        const payload = {
+          message: 'Update bromess.md',
+          content: btoa(JSON.stringify(content, null, 2)),
+          sha: sha
+        };
+        
+        const response = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${GITHUB_TOKEN}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/vnd.github.v3+json'
+          },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) throw new Error(`Ошибка сохранения: ${response.status}`);
+        const result = await response.json();
+        return result.content.sha;
+      } catch (e) {
+        console.error('Ошибка сохранения в GitHub:', e);
+        return null;
+      }
     }
 
-    let data = loadData();
-    let currentUser = data.currentUser || null;
-    let messages = data.messages || [];
+    // === ОСНОВНЫЕ ФУНКЦИИ ===
+    async function loadFromGitHub() {
+      try {
+        const result = await fetchFromGitHub();
+        if (result) {
+          const fileData = result.content;
+          data = fileData;
+          messages = data.messages || [];
+          currentUser = data.currentUser || null;
+          if (currentUser && !data.users[currentUser]) {
+            currentUser = null;
+            data.currentUser = null;
+          }
+          return true;
+        }
+        return false;
+      } catch (e) {
+        console.error('Ошибка загрузки:', e);
+        return false;
+      }
+    }
+
+    async function saveToGitHubWithRetry() {
+      if (syncInProgress) return;
+      syncInProgress = true;
+      document.getElementById('syncStatus').textContent = '● синхронизация...';
+      
+      try {
+        data.messages = messages;
+        data.currentUser = currentUser;
+        
+        // Получаем текущий SHA
+        const current = await fetchFromGitHub();
+        const sha = current ? current.sha : null;
+        
+        const newSha = await saveToGitHub(data, sha);
+        if (newSha) {
+          document.getElementById('syncStatus').textContent = '✓ синхронизировано';
+          // Сохраняем локально как резерв
+          localStorage.setItem('bromess_backup', JSON.stringify(data));
+        } else {
+          document.getElementById('syncStatus').textContent = '⚠ ошибка синхронизации';
+        }
+      } catch (e) {
+        console.error('Ошибка синхронизации:', e);
+        document.getElementById('syncStatus').textContent = '⚠ ошибка синхронизации';
+      }
+      syncInProgress = false;
+    }
+
+    async function saveAndSync() {
+      await saveToGitHubWithRetry();
+      renderAll();
+    }
 
     // === DOM ===
     const messagesContainer = document.getElementById('messagesList');
@@ -751,13 +846,6 @@
       return getUser(currentUser);
     }
 
-    function saveAndSync() {
-      data.messages = messages;
-      data.currentUser = currentUser;
-      saveData(data);
-      renderAll();
-    }
-
     function escapeHtml(str) {
       if (!str) return '';
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -799,7 +887,6 @@
       messagesContainer.innerHTML = html;
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-      // click on image to preview
       document.querySelectorAll('.msg-image').forEach(img => {
         img.addEventListener('click', function(e) {
           e.stopPropagation();
@@ -810,7 +897,6 @@
           }
         });
       });
-      // click on file to download
       document.querySelectorAll('.file-attachment').forEach(el => {
         el.addEventListener('click', function() {
           const data = this.getAttribute('data-file');
@@ -884,7 +970,6 @@
       renderMessages();
       updateHeader();
       renderContacts(contactSearchInput.value);
-      // profile fields
       const user = getCurrentUser();
       if (user) {
         profileNameInput.value = user.name || '';
@@ -902,7 +987,7 @@
       }
     }
 
-    // === add message with attachments ===
+    // === add message ===
     function addMessage(text, out = true, type = 'text', fileData = null, fileName = null, fileType = null) {
       const now = new Date();
       const msg = {
@@ -945,24 +1030,26 @@
     }
 
     // === login ===
-    function attemptLogin() {
+    async function attemptLogin() {
       const login = loginInput.value.trim();
       if (!login) { loginError.textContent = 'Введите логин'; return; }
+      
+      // Проверяем, есть ли пользователь в данных
       if (data.users[login]) {
         loginError.textContent = '❌ Логин занят. Войдите под другим.';
         return;
       }
+      
       data.users[login] = { name: login, avatar: login.charAt(0).toUpperCase(), contacts: [] };
       currentUser = login;
-      messages = data.messages || [];
-      saveAndSync();
+      await saveAndSync();
       loginModal.classList.add('hidden');
       loginError.textContent = '';
       msgInput.focus();
     }
 
     // === profile ===
-    function saveProfile() {
+    async function saveProfile() {
       const user = getCurrentUser();
       if (!user) return;
       const newName = profileNameInput.value.trim() || currentUser;
@@ -970,16 +1057,16 @@
       user.name = newName;
       user.avatar = newAvatar;
       data.users[currentUser] = user;
-      saveAndSync();
+      await saveAndSync();
       profileModal.classList.add('hidden');
       renderAll();
     }
 
-    function logout() {
+    async function logout() {
       if (confirm('Выйти из аккаунта?')) {
         currentUser = null;
         data.currentUser = null;
-        saveData(data);
+        await saveAndSync();
         loginModal.classList.remove('hidden');
         profileModal.classList.add('hidden');
         renderAll();
@@ -989,29 +1076,53 @@
     }
 
     // === clear ===
-    function clearMessages() {
+    async function clearMessages() {
       if (messages.length === 0) return;
       if (confirm('Очистить всю историю?')) {
         messages = [];
-        saveAndSync();
+        await saveAndSync();
         msgInput.focus();
       }
     }
 
     // === init ===
-    function init() {
+    async function init() {
+      // Проверяем настройки GitHub
+      if (GITHUB_USERNAME === 'ваш-логин' || GITHUB_REPO === 'ваш-репозиторий' || GITHUB_TOKEN === 'ваш-token') {
+        alert('⚠️ Настройте GitHub в коде!\nЗамените GITHUB_USERNAME, GITHUB_REPO и GITHUB_TOKEN');
+        loginModal.classList.remove('hidden');
+        return;
+      }
+
+      // Загружаем данные из GitHub
+      document.getElementById('syncStatus').textContent = '● загрузка...';
+      const loaded = await loadFromGitHub();
+      
+      if (!loaded) {
+        // Если не загрузилось, пробуем восстановить из localStorage
+        const backup = localStorage.getItem('bromess_backup');
+        if (backup) {
+          try {
+            data = JSON.parse(backup);
+            messages = data.messages || [];
+            currentUser = data.currentUser || null;
+          } catch (e) {}
+        }
+      }
+
       if (!currentUser || !data.users[currentUser]) {
         loginModal.classList.remove('hidden');
         currentUser = null;
         data.currentUser = null;
-        saveData(data);
+        await saveToGitHubWithRetry();
       } else {
         loginModal.classList.add('hidden');
+        document.getElementById('syncStatus').textContent = '✓ загружено';
       }
 
       renderAll();
 
-      // send
+      // Обработчики событий
       sendBtn.addEventListener('click', () => {
         if (!currentUser) { alert('Сначала войдите'); return; }
         const text = msgInput.value;
@@ -1035,7 +1146,6 @@
         this.style.height = Math.min(this.scrollHeight, 100) + 'px';
       });
 
-      // file buttons
       fileBtn.addEventListener('click', () => fileInput.click());
       imageBtn.addEventListener('click', () => imageInput.click());
 
@@ -1073,7 +1183,6 @@
         updateAvatarPreview(this.value);
       });
 
-      // contacts toggle
       toggleContactsBtn.addEventListener('click', () => {
         contactsPanel.classList.toggle('open');
         if (contactsPanel.classList.contains('open')) {
@@ -1088,18 +1197,24 @@
         renderContacts(this.value);
       });
 
-      // image preview close
       imagePreviewOverlay.addEventListener('click', function() {
         this.classList.add('hidden');
         previewImage.src = '';
       });
 
-      // если нет сообщений, приветственные
+      // Автосохранение каждые 30 секунд
+      setInterval(() => {
+        if (messages.length > 0) {
+          saveToGitHubWithRetry();
+        }
+      }, 30000);
+
+      // Приветственные сообщения, если пусто
       if (messages.length === 0 && currentUser) {
         messages.push({ text: 'Добро пожаловать в bromess!', time: '12:00', out: false, timestamp: Date.now() - 60000 });
-        messages.push({ text: 'Можно отправлять фото и файлы', time: '12:01', out: false, timestamp: Date.now() - 30000 });
+        messages.push({ text: 'Сообщения хранятся на GitHub', time: '12:01', out: false, timestamp: Date.now() - 30000 });
         messages.push({ text: 'Привет!', time: '12:02', out: true, timestamp: Date.now() });
-        saveAndSync();
+        await saveAndSync();
       }
     }
 
